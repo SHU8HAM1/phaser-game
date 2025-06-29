@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from 'react';
-import Phaser from 'phaser';
+import * as Phaser from 'phaser';
 
 interface PhaserGameProps {
     // Props can be added here if needed later, e.g., to pass game configurations
