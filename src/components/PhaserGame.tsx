@@ -13,13 +13,13 @@ class BootScene extends Phaser.Scene {
 
     preload() {
         console.log('BootScene preload');
-        // Load the grassland tileset image from a local path
-        // Assumes grassland_tiles.png is in public/assets/tilesets/
-        const tilesetURL = '/assets/tilesets/grassland_tiles.png';
-        console.log(`Initiating preload for grassland tileset from: ${tilesetURL}`);
-        this.load.spritesheet('tileset_grass', tilesetURL, {
-            frameWidth: 64,
-            frameHeight: 128
+        // Load your new 8x8 tileset (32x32 tiles)
+        // Assumes grassland_tiles.png (now your 256x256px file) is in public/assets/tilesets/
+        const tilesetURL = '/assets/tilesets/grassland_tiles.png'; // Using the same name as before for simplicity
+        console.log(`Initiating preload for your 8x8 tileset (32x32 tiles) from: ${tilesetURL}`);
+        this.load.spritesheet('tileset_custom', tilesetURL, { // New key: 'tileset_custom'
+            frameWidth: 32, // Your tile width
+            frameHeight: 32  // Your tile height
         });
     }
 
@@ -42,75 +42,62 @@ class MainScene extends Phaser.Scene {
     create() {
         console.log('MainScene create');
 
-        // Tilemap configuration
-        const mapWidth = 30;
-        const mapHeight = 30;
-        const tileWidthIsometric = 64; // Base width of the isometric cell
-        const tileHeightIsometric = 32; // Base height of the isometric cell
+        // Tilemap configuration for your orthogonal tileset
+        const mapWidth = 30; // Number of tiles wide
+        const mapHeight = 30; // Number of tiles high
+        const tilePixelWidth = 32; // Width of a single tile in pixels
+        const tilePixelHeight = 32; // Height of a single tile in pixels
 
-        // Create map data (30x30 grid)
-        // Using 0 for grass, 1 for a path (assuming from tileset_grass)
+        // Your target tile index: 6th from left (col 5), 5th from top (row 4) in an 8-col grid
+        // index = (row * num_cols) + col = (4 * 8) + 5 = 37
+        const targetTileIndex = 37;
+
+        // Create map data (30x30 grid), all using your target tile
         const mapData: number[][] = [];
         for (let y = 0; y < mapHeight; y++) {
             const row: number[] = [];
             for (let x = 0; x < mapWidth; x++) {
-                if (y === Math.floor(mapHeight / 2) && x >= 5 && x < mapWidth - 5) {
-                    row.push(1); // Path tile index
-                } else {
-                    row.push(0); // Grass tile index
-                }
+                row.push(targetTileIndex);
             }
             mapData.push(row);
         }
 
-        // Create the tilemap
-        // For isometric maps, Phaser needs the tileWidth and tileHeight of the base cell,
-        // not necessarily the frameWidth/frameHeight of the spritesheet if they differ.
+        // Create the orthogonal tilemap
         const map = this.make.tilemap({
             data: mapData,
-            tileWidth: tileWidthIsometric, // Width of the isometric grid cell
-            tileHeight: tileHeightIsometric, // Height of the isometric grid cell
+            tileWidth: tilePixelWidth,
+            tileHeight: tilePixelHeight,
             width: mapWidth,
             height: mapHeight,
-            orientation: Phaser.Tilemaps.Orientation.ISOMETRIC, // Explicitly set orientation
+            orientation: Phaser.Tilemaps.Orientation.ORTHOGONAL, // Set to Orthogonal
         });
 
-        // Add the tileset image to the map.
-        // The first parameter is the name of the Tiled tileset (can be arbitrary if not using Tiled JSON).
-        // The second is the key of the preloaded tileset image in Phaser.
-        // The third and fourth are tileWidth and tileHeight *as defined in the spritesheet frames*.
-        // For isometric tiles that "stand up", this will be different from the map's cell dimensions.
-
-        // --- TEST WITH PHASER LOGO ---
-        // Using arbitrary frame dimensions for the logo as a test.
-        // The second is the key of the preloaded tileset image in Phaser.
-        // The third and fourth are tileWidth and tileHeight *as defined in the spritesheet frames*.
-        // For isometric tiles that "stand up", this will be different from the map's cell dimensions.
-        const tileset = map.addTilesetImage('grassland_isometric_tiles', 'tileset_grass', 64, 128);
+        // Add your tileset image to the map
+        // First param: Name for the tileset within Tiled (arbitrary here)
+        // Second param: Key of the preloaded tileset image in Phaser ('tileset_custom')
+        // Third/Fourth: Tile width/height in the spritesheet (32x32 for yours)
+        const tileset = map.addTilesetImage('my_custom_tiles', 'tileset_custom', tilePixelWidth, tilePixelHeight);
 
         if (tileset) {
-            // Create the layer. Layer name can be arbitrary.
-            const layer = map.createLayer(0, tileset, 0, 0);
+            const layer = map.createLayer(0, tileset, 0, 0); // Layer index 0
             if (layer) {
-                console.log('Tilemap layer created successfully');
-                // Optional: If you want tiles to have different depths based on Y
-                // layer.setDepthSort(true); // Might not be needed for pure background
+                console.log('Orthogonal tilemap layer created successfully with your custom tile.');
             } else {
-                console.error('Failed to create tilemap layer.');
+                console.error('Failed to create orthogonal tilemap layer.');
             }
         } else {
-            console.error('Failed to add tileset to map. Is the key "tileset_grass" correct and loaded?');
+            console.error('Failed to add custom tileset to map. Is the key "tileset_custom" correct and loaded?');
         }
 
-        this.add.text(10, 10, 'Tilemap Loaded! Use cursors to scroll.', {
+        this.add.text(10, 10, 'Orthogonal Map with Your Tile! Use cursors to scroll.', {
             color: '#ffffff',
             fontSize: '16px',
             backgroundColor: 'rgba(0,0,0,0.7)'
-        }).setScrollFactor(0); // Keep text fixed on screen
+        }).setScrollFactor(0);
 
-        // Camera setup
+        // Camera setup for orthogonal map
+        // World dimensions are simpler: mapWidthInTiles * tilePixelWidth
         this.cameras.main.setBounds(0, 0, map.widthInPixels, map.heightInPixels);
-        // this.cameras.main.centerOn(map.widthInPixels / 2, map.heightInPixels / 2);
         this.cursors = this.input.keyboard?.createCursorKeys();
     }
 
@@ -118,21 +105,13 @@ class MainScene extends Phaser.Scene {
 
     update(time: number, delta: number) {
         if (!this.cursors) return;
-
-        const speed = 400; // pixels per second
+        const speed = 400;
         const scrollSpeed = speed * (delta / 1000);
 
-        if (this.cursors.left.isDown) {
-            this.cameras.main.scrollX -= scrollSpeed;
-        } else if (this.cursors.right.isDown) {
-            this.cameras.main.scrollX += scrollSpeed;
-        }
-
-        if (this.cursors.up.isDown) {
-            this.cameras.main.scrollY -= scrollSpeed;
-        } else if (this.cursors.down.isDown) {
-            this.cameras.main.scrollY += scrollSpeed;
-        }
+        if (this.cursors.left.isDown) this.cameras.main.scrollX -= scrollSpeed;
+        else if (this.cursors.right.isDown) this.cameras.main.scrollX += scrollSpeed;
+        if (this.cursors.up.isDown) this.cameras.main.scrollY -= scrollSpeed;
+        else if (this.cursors.down.isDown) this.cameras.main.scrollY += scrollSpeed;
     }
 }
 
@@ -142,44 +121,41 @@ const PhaserGame: React.FC<PhaserGameProps> = () => {
 
     useEffect(() => {
         if (typeof window !== 'undefined' && gameContainerRef.current && !gameInstanceRef.current) {
-            // Isometric map dimensions
+            // Orthogonal map dimensions
             const mapTilesWide = 30;
             const mapTilesHigh = 30;
-            const cellWidth = 64; // isometric cell width
-            const cellHeight = 32; // isometric cell height
+            const tilePixelWidth = 32;
+            const tilePixelHeight = 32;
 
-            // Calculate the overall pixel size of the isometric map
-            // For an isometric map, width = (mapTilesWide + mapTilesHigh) * cellWidth / 2
-            // And height = (mapTilesWide + mapTilesHigh) * cellHeight / 2
-            const gameWorldWidth = (mapTilesWide + mapTilesHigh) * cellWidth / 2; // (30+30)*32 = 1920
-            const gameWorldHeight = (mapTilesWide + mapTilesHigh) * cellHeight / 2; // (30+30)*16 = 960
+            const gameWorldWidth = mapTilesWide * tilePixelWidth; // 30 * 32 = 960
+            const gameWorldHeight = mapTilesHigh * tilePixelHeight; // 30 * 32 = 960
 
-            // Viewport size (how much of the game world is visible at once)
-            const viewportWidth = Math.min(gameWorldWidth, 1280); // Cap viewport at 1280 or world width
-            const viewportHeight = Math.min(gameWorldHeight, 720); // Cap viewport at 720 or world height
+            // Viewport size
+            const viewportWidth = Math.min(gameWorldWidth, 960);
+            const viewportHeight = Math.min(gameWorldHeight, 960);
 
             const config: Phaser.Types.Core.GameConfig = {
                 type: Phaser.AUTO,
-                width: viewportWidth, // Display width
-                height: viewportHeight, // Display height
+                width: viewportWidth,
+                height: viewportHeight,
                 parent: gameContainerRef.current,
                 scene: [BootScene, MainScene],
-                physics: {
-                    default: 'arcade', // Arcade physics not typically used for isometric tile movement directly
+                physics: { // Physics might not be used yet but good to have configured
+                    default: 'arcade',
                     arcade: {
                         gravity: { y: 0 },
-                        debug: false // Set to true for debugging physics bodies
+                        debug: false
                     }
                 },
-                pixelArt: true, // Good for many pixel art tilesets
+                pixelArt: true,
                 render: {
-                    antialias: false, // Ensures pixel art isn't blurred
-                    pixelArt: true, // Redundant with top-level pixelArt but good for emphasis
+                    antialias: false,
+                    pixelArt: true,
                 }
             };
 
             gameInstanceRef.current = new Phaser.Game(config);
-            console.log('Phaser Game instance created with config:', config);
+            console.log('Phaser Game instance created with orthogonal config:', config);
         }
 
         return () => {
@@ -191,10 +167,16 @@ const PhaserGame: React.FC<PhaserGameProps> = () => {
         };
     }, []);
 
-    // Adjust div style to match viewport, or make it scrollable if fixed size
-    // For now, let's make the container match the game viewport size
-    const viewportWidth = Math.min((30 + 30) * 64 / 2, 1280);
-    const viewportHeight = Math.min((30 + 30) * 32 / 2, 720);
+    // Adjust div style to match viewport
+    const mapTilesWide = 30;
+    const mapTilesHigh = 30;
+    const tilePixelWidth = 32;
+    const tilePixelHeight = 32;
+    const gameWorldWidth = mapTilesWide * tilePixelWidth;
+    const gameWorldHeight = mapTilesHigh * tilePixelHeight;
+    const viewportWidth = Math.min(gameWorldWidth, 960);
+    const viewportHeight = Math.min(gameWorldHeight, 960);
+
 
     return <div ref={gameContainerRef} id="phaser-game-container" style={{ width: `${viewportWidth}px`, height: `${viewportHeight}px`, overflow: 'hidden' }} />;
 };
