@@ -12,17 +12,15 @@ class BootScene extends Phaser.Scene {
     }
 
     preload() {
-        // For now, no assets to preload for the basic setup
         console.log('BootScene preload');
-        // Load the grassland tileset image
-        // URL: https://opengameart.org/sites/default/files/grassland_tiles.png
-        // Key: 'tileset_grass'
-        // Frame Width: 64, Frame Height: 128 (as determined from TMX analysis for this specific tilesheet)
-        this.load.spritesheet('tileset_grass', 'https://opengameart.org/sites/default/files/grassland_tiles.png', {
+        // Load the grassland tileset image from a local path
+        // Assumes grassland_tiles.png is in public/assets/tilesets/
+        const tilesetURL = '/assets/tilesets/grassland_tiles.png';
+        console.log(`Initiating preload for grassland tileset from: ${tilesetURL}`);
+        this.load.spritesheet('tileset_grass', tilesetURL, {
             frameWidth: 64,
             frameHeight: 128
         });
-        console.log('Grassland tileset preload initiated');
     }
 
     create() {
@@ -79,6 +77,12 @@ class MainScene extends Phaser.Scene {
 
         // Add the tileset image to the map.
         // The first parameter is the name of the Tiled tileset (can be arbitrary if not using Tiled JSON).
+        // The second is the key of the preloaded tileset image in Phaser.
+        // The third and fourth are tileWidth and tileHeight *as defined in the spritesheet frames*.
+        // For isometric tiles that "stand up", this will be different from the map's cell dimensions.
+
+        // --- TEST WITH PHASER LOGO ---
+        // Using arbitrary frame dimensions for the logo as a test.
         // The second is the key of the preloaded tileset image in Phaser.
         // The third and fourth are tileWidth and tileHeight *as defined in the spritesheet frames*.
         // For isometric tiles that "stand up", this will be different from the map's cell dimensions.
