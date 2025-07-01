@@ -146,8 +146,12 @@ function gameLoop() {
 
     let finalX = currentX;
     let finalY = currentY;
-    let canMoveX = true;
-    let canMoveY = true;
+    let canMoveX = true; // Assume can move, prove otherwise
+    let canMoveY = true; // Assume can move, prove otherwise
+
+    // if (player.vx !== 0 || player.vy !== 0) { // Only log if there's an attempt to move
+    //   console.log(`[DebugMove] Start: Client ${clientId}, ActiveKeys: ${Array.from(player.activeKeys)}, Pos: (${currentX.toFixed(2)}, ${currentY.toFixed(2)}), Vel: (${player.vx.toFixed(2)}, ${player.vy.toFixed(2)}), Next: (${nextX.toFixed(2)}, ${nextY.toFixed(2)})`);
+    // }
 
     // --- Collision Detection ---
     // Player dimensions (approximate collision box)
@@ -161,19 +165,27 @@ function gameLoop() {
 
         // Check tiles at player's current top and bottom Y for the new X position
         const yTileTop = Math.floor(currentY / TILE_SIZE);
-        const yTileBottom = Math.floor((currentY + playerHeight -1) / TILE_SIZE); // -1 to stay within player
+        const yTileBottom = Math.floor((currentY + playerHeight) / TILE_SIZE); // Hypothetical: removed -1
 
         const collisionTileXTop = OBSTACLE_MATRIX[yTileTop] && OBSTACLE_MATRIX[yTileTop][xTile];
-        const collisionTileXBottom = OBSTACLE_MATRIX[yTileBottom] && OBSTACLE_MATRIX[yTileBottom][xTile];
+        // Ensure yTileBottom is not out of bounds for the next check if it's different from yTileTop
+        const collisionTileXBottom = (yTileBottom < MAP_HEIGHT_TILES && OBSTACLE_MATRIX[yTileBottom]) ? OBSTACLE_MATRIX[yTileBottom][xTile] : undefined;
+
 
         if ((collisionTileXTop !== -1 && collisionTileXTop !== undefined) ||
             (collisionTileXBottom !== -1 && collisionTileXBottom !== undefined)) {
             canMoveX = false;
         }
+        // if (player.vx !== 0) { // Log X collision details only if X movement was attempted
+        //     console.log(`[DebugMove] X-Check: Client ${clientId}, xTile: ${xTile}, yTileTop: ${yTileTop}, yTileBottom: ${yTileBottom}, tileValTop: ${collisionTileXTop}, tileValBottom: ${collisionTileXBottom}, canMoveX: ${canMoveX}`);
+        // }
     }
     if (canMoveX) {
         finalX = nextX;
+    } else if (player.vx !== 0) { // If movement was attempted but failed
+        finalX = currentX; // Explicitly ensure it's current if no move
     }
+
 
     // Check Y-axis movement (using potentially updated X if sliding is desired, or currentX if not)
     // For simplicity, let's use finalX from X-movement resolution.
@@ -183,22 +195,31 @@ function gameLoop() {
 
         // Check tiles at player's resolved X (finalX) left and right for the new Y position
         const xTileLeft = Math.floor(finalX / TILE_SIZE);
-        const xTileRight = Math.floor((finalX + playerWidth -1) / TILE_SIZE);
+        const xTileRight = Math.floor((finalX + playerWidth) / TILE_SIZE); // Hypothetical: removed -1
 
-        const collisionTileYLeft = OBSTACLE_MATRIX[yTile] && OBSTACLE_MATRIX[yTile][xTileLeft];
-        const collisionTileYRight = OBSTACLE_MATRIX[yTile] && OBSTACLE_MATRIX[yTile][xTileRight];
+        const collisionTileYLeft = (yTile < MAP_HEIGHT_TILES && OBSTACLE_MATRIX[yTile]) ? OBSTACLE_MATRIX[yTile][xTileLeft] : undefined;
+        const collisionTileYRight = (yTile < MAP_HEIGHT_TILES && OBSTACLE_MATRIX[yTile]) ? OBSTACLE_MATRIX[yTile][xTileRight] : undefined;
 
         if ((collisionTileYLeft !== -1 && collisionTileYLeft !== undefined) ||
             (collisionTileYRight !== -1 && collisionTileYRight !== undefined)) {
             canMoveY = false;
         }
+        // if (player.vy !== 0) { // Log Y collision details only if Y movement was attempted
+        //     console.log(`[DebugMove] Y-Check: Client ${clientId}, yTile: ${yTile}, xTileLeft: ${xTileLeft}, xTileRight: ${xTileRight}, tileValLeft: ${collisionTileYLeft}, tileValRight: ${collisionTileYRight}, canMoveY: ${canMoveY}`);
+        // }
     }
     if (canMoveY) {
         finalY = nextY;
+    } else if (player.vy !== 0) { // If movement was attempted but failed
+        finalY = currentY; // Explicitly ensure it's current if no move
     }
 
     player.x = finalX;
     player.y = finalY;
+
+    // if (player.vx !== 0 || player.vy !== 0) { // Log final decision only if movement was attempted
+    //    console.log(`[DebugMove] End: Client ${clientId}, FinalPos: (${player.x.toFixed(2)}, ${player.y.toFixed(2)}) (was: ${currentX.toFixed(2)}, ${currentY.toFixed(2)})`);
+    // }
 
     // Ensure player stays within overall map pixel bounds (redundant if border tiles are solid)
     player.x = Math.max(0, Math.min(player.x, MAP_WIDTH_TILES * TILE_SIZE - 28)); // 28 is player width
