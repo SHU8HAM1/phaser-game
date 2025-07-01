@@ -213,8 +213,56 @@ class MainScene extends Phaser.Scene {
 const PhaserGame: React.FC<PhaserGameProps> = () => {
     const gameContainerRef = useRef<HTMLDivElement>(null);
     const gameInstanceRef = useRef<Phaser.Game | null>(null);
+    const wsRef = useRef<WebSocket | null>(null); // Ref to hold the WebSocket instance
 
     useEffect(() => {
+        // Initialize WebSocket connection
+        // Ensure this runs only once or is properly cleaned up
+        if (typeof window !== 'undefined' && !wsRef.current) {
+            const websocketUrl = process.env.NEXT_PUBLIC_WEBSOCKET_URL || 'ws://localhost:3001';
+            console.log(`Connecting to WebSocket server at ${websocketUrl}`);
+            const socket = new WebSocket(websocketUrl);
+
+            socket.onopen = () => {
+                console.log('WebSocket connection established');
+                wsRef.current = socket;
+                // Optionally send a message upon connection
+                // socket.send(JSON.stringify({ type: 'clientHello', message: 'Hello from Phaser frontend!' }));
+            };
+
+            socket.onmessage = (event) => {
+                console.log('WebSocket message received:', event.data);
+                try {
+                    const message = JSON.parse(event.data as string);
+                    // Handle messages from the server
+                    if (message.type === 'gameStateUpdate') {
+                        console.log('Game state update:', message.payload);
+                        // Here you would update your Phaser game based on the new state
+                        // For example, by calling a method on a scene:
+                        // gameInstanceRef.current?.scene.getScene('MainScene').data.set('gameState', message.payload);
+                    } else if (message.type === 'welcome') {
+                        console.log(`Welcome message from server: ${message.message} (Client ID: ${message.clientId})`);
+                    } else if (message.type === 'chat') {
+                        console.log(`Chat from ${message.senderId}: ${message.payload}`);
+                    } else if (message.type === 'error') {
+                        console.error(`Error from server: ${message.message}`);
+                    }
+                } catch (error) {
+                    console.error('Error parsing WebSocket message or handling event:', error);
+                }
+            };
+
+            socket.onerror = (error) => {
+                console.error('WebSocket error:', error);
+            };
+
+            socket.onclose = (event) => {
+                console.log('WebSocket connection closed:', event.reason, `Code: ${event.code}`);
+                wsRef.current = null;
+            };
+        }
+
+        // Initialize Phaser Game
         if (typeof window !== 'undefined' && gameContainerRef.current && !gameInstanceRef.current) {
             // Orthogonal map dimensions
             const mapTilesWide = 40;
