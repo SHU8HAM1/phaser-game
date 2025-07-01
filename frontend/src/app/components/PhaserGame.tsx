@@ -83,41 +83,42 @@ class MainScene extends Phaser.Scene {
     init() {
         // Attempt to get WebSocket from registry
         this.ws = this.game.registry.get('ws');
+        // if (this.ws) console.log('[MainScene Init] WebSocket retrieved from registry.');
+
         this.localClientId = this.game.registry.get('clientId');
+        // if (this.localClientId) console.log('[MainScene Init] localClientId retrieved from registry:', this.localClientId);
 
         // Listen for changes in registry if they are set later
         this.game.registry.events.on('changedata-ws', (_parent: any, value: WebSocket) => {
             this.ws = value;
+            // console.log('[MainScene RegistryEvent] ws updated.');
         });
         this.game.registry.events.on('changedata-clientId', (_parent: any, value: string) => {
             this.localClientId = value;
+            // console.log('[MainScene RegistryEvent] localClientId updated to:', this.localClientId);
         });
          this.game.registry.events.on('changedata-serverGameState', (_parent: any, value: any) => {
+            // console.log('[MainScene RegistryEvent] serverGameState changed in registry:', value ? JSON.parse(JSON.stringify(value)) : 'null');
             this.lastServerUpdate = value;
-            // Process immediately if needed, or pick up in update()
-            // this.handleGameStateUpdate(value);
+            // If processing directly here, ensure it's safe (e.g., not mid-phaser-update-critical-path issue)
+            // For now, relying on update() to pick it up.
         });
     }
 
     preload() {
-        console.log('MainScene preload');
+        // console.log('MainScene preload'); // Standard Phaser log, can be kept or removed
     }
 
     create() {
-        console.log('MainScene create');
+        // console.log('MainScene create'); // Standard Phaser log
 
         // Retrieve WebSocket connection from registry
-        this.ws = this.game.registry.get('ws');
-        if (this.ws) {
-            console.log('MainScene: WebSocket connection retrieved from registry.');
-        } else {
-            console.warn('MainScene: WebSocket connection not found in registry at create time. Will check in update.');
-            // Optionally, listen for an event from the registry if ws is set later
-            this.game.registry.events.on('changedata-ws', (_parent: any, value: WebSocket) => {
-                console.log('MainScene: WebSocket connection set in registry after create.');
-                this.ws = value;
-            });
+        // This is somewhat redundant due to init() listener, but harmless as a fallback.
+        if (!this.ws) { // Only if not already set by init or event
+            this.ws = this.game.registry.get('ws');
+            // if (this.ws) console.log('MainScene Create: ws retrieved.');
         }
+        // Similar for localClientId if needed, though usually set by welcome message quickly.
 
 
         // Tilemap configuration for your orthogonal tileset
@@ -187,7 +188,14 @@ class MainScene extends Phaser.Scene {
         player.body.setSize(28, 28).setOffset(10, 10);
         this.cameras.main.startFollow(player);
         this.player = player;
-        this.physics.add.collider(player, obstacleLayer);
+        // REMOVE client-side collision for the local player against the obstacle layer.
+        // Server is authoritative for position and collision.
+        // this.physics.add.collider(player, obstacleLayer);
+        // We might still want this collider if other dynamic entities controlled by client need to collide with player.
+        // But for server-driven player movement, this often causes conflicts.
+        // For now, let's assume the player sprite itself should not be stopped by client-side static obstacles.
+        // If other players are also added with physics bodies, they might need this collider,
+        // or they too should have their positions set directly by server state.
 
         // Animations for each direction, 4 frames each
         this.anims.create({
@@ -298,17 +306,23 @@ class MainScene extends Phaser.Scene {
 
     update(time: number, delta: number) {
         // Ensure ws and clientId are available if they weren't at init/create
-        if (!this.ws) this.ws = this.game.registry.get('ws');
-        if (!this.localClientId) this.localClientId = this.game.registry.get('clientId');
-
-        const serverGameState = this.game.registry.get('serverGameState');
-        if (serverGameState && serverGameState !== this.lastServerUpdate) {
-            this.lastServerUpdate = serverGameState; // Mark as processed for this frame, or use a more robust flag
-            this.handleGameStateUpdate(serverGameState);
+        if (!this.ws) {
+            this.ws = this.game.registry.get('ws');
+            // if (this.ws) console.log('[MainScene Update] ws late retrieved.');
         }
-        // Clear the registry value after processing to avoid reprocessing if no new update comes
-        // Or rely on this.lastServerUpdate comparison. For now, let's clear it.
-        this.game.registry.set('serverGameState', null);
+        if (!this.localClientId) {
+            this.localClientId = this.game.registry.get('clientId');
+            // if (this.localClientId) console.log('[MainScene Update] localClientId late retrieved:', this.localClientId);
+        }
+
+        // Use this.lastServerUpdate which is populated by the registry event listener
+        const currentServerUpdate = this.lastServerUpdate;
+
+        if (currentServerUpdate) { // Check if there's any update
+            // console.log('[MainScene Update] Processing serverGameState from this.lastServerUpdate:', JSON.parse(JSON.stringify(currentServerUpdate)));
+            this.handleGameStateUpdate(currentServerUpdate);
+            this.lastServerUpdate = null; // Consume the update
+        }
 
 
         // Local animation updates for the local player (based on pressed keys)
@@ -334,23 +348,29 @@ class MainScene extends Phaser.Scene {
 
     private handleGameStateUpdate(gameState: any) {
         if (!gameState || !gameState.players) {
-            // console.warn('[Frontend] handleGameStateUpdate received invalid or empty gameState:', gameState);
+            // console.warn('[MainScene HGSUpdate] Received invalid or empty gameState:', gameState);
             return;
         }
-        // Deep clone for logging to avoid issues if gameState is mutated elsewhere or to see it at this point in time
-        // console.log('[Frontend] Handling serverGameState:', JSON.parse(JSON.stringify(gameState)));
+        // console.log('[MainScene HGSUpdate] Handling gameState:', JSON.parse(JSON.stringify(gameState)));
+
+        if (!this.localClientId) {
+            // console.warn('[MainScene HGSUpdate] localClientId is not set yet. Skipping player updates.');
+            return;
+        }
 
         const serverPlayers = gameState.players;
         const allServerPlayerIds = Object.keys(serverPlayers);
 
         // Update local player
-        if (this.player && this.localClientId && serverPlayers[this.localClientId]) {
+        if (this.player && serverPlayers[this.localClientId]) { // Check if localClientId exists in serverPlayers
             const playerData = serverPlayers[this.localClientId];
-            // console.log(`[Frontend] LocalPlayer (${this.localClientId}) Update: ServerPos {x: ${playerData.x.toFixed(2)}, y: ${playerData.y.toFixed(2)}}, ServerVel {vx: ${playerData.vx.toFixed(2)}, vy: ${playerData.vy.toFixed(2)}}. CurrentSpritePos {x: ${this.player.x.toFixed(2)}, y: ${this.player.y.toFixed(2)}}`);
+            // console.log(`[MainScene HGSUpdate] LocalPlayer (${this.localClientId}): ServerData: P(${playerData.x.toFixed(2)}, ${playerData.y.toFixed(2)}) V(${playerData.vx.toFixed(2)}, ${playerData.vy.toFixed(2)}). CurrentSprite: P(${this.player.x.toFixed(2)}, ${this.player.y.toFixed(2)})`);
 
-            // Only tween if there's a significant difference to avoid micro-tweens
-            if (Math.abs(this.player.x - playerData.x) > 0.5 || Math.abs(this.player.y - playerData.y) > 0.5) {
-                // console.log(`[Frontend] LocalPlayer (${this.localClientId}): Tweening from (${this.player.x.toFixed(2)}, ${this.player.y.toFixed(2)}) to (${playerData.x.toFixed(2)}, ${playerData.y.toFixed(2)})`);
+            const positionChanged = Math.abs(this.player.x - playerData.x) > 0.1 || Math.abs(this.player.y - playerData.y) > 0.1; // Lowered threshold for logging
+            // console.log(`[MainScene HGSUpdate] LocalPlayer (${this.localClientId}): Position changed for tween? ${positionChanged}. DiffX: ${Math.abs(this.player.x - playerData.x)}, DiffY: ${Math.abs(this.player.y - playerData.y)}`);
+
+            if (positionChanged) {
+                // console.log(`[MainScene HGSUpdate] LocalPlayer (${this.localClientId}): CREATING TWEEN from (${this.player.x.toFixed(2)}, ${this.player.y.toFixed(2)}) to (${playerData.x.toFixed(2)}, ${playerData.y.toFixed(2)})`);
                 this.tweens.add({
                     targets: this.player,
                     x: playerData.x,
@@ -445,21 +465,25 @@ const PhaserGame: React.FC<PhaserGameProps> = () => {
                 try {
                     const message = JSON.parse(event.data as string);
                     // Handle messages from the server
+                    // console.log('[WebSocket MSG Parsed]', message); // Log parsed message
+
                     if (message.type === 'gameStateUpdate') {
-                        // console.log('Game state update:', message.payload); // Can be too verbose
-                        // Pass the gameState to the active scene (MainScene) via registry
+                        // console.log('[Frontend] Received gameStateUpdate, payload:', JSON.parse(JSON.stringify(message.payload)));
                         if (gameInstanceRef.current) {
-                            // It's good practice to pass only necessary data or diffs,
-                            // but for now, we pass the whole player's part of the payload.
-                            // The scene will decide how to use it.
                             gameInstanceRef.current.registry.set('serverGameState', message.payload);
+                            // console.log('[Frontend] Set serverGameState in registry.');
                             // We can also emit an event if the scene needs to react immediately
-                            // gameInstanceRef.current.events.emit('serverGameStateUpdate', message.payload);
+                            // gameInstanceRef.current.events.emit('serverGameStateUpdate', message.payload); // Example if using events
+                        } else {
+                            // console.warn('[Frontend] gameInstanceRef.current is null, cannot set serverGameState in registry.');
                         }
                     } else if (message.type === 'welcome') {
-                        console.log(`Welcome message from server: ${message.message} (Client ID: ${message.clientId})`);
+                        // console.log(`[Frontend] Welcome message from server: ${message.message} (Client ID: ${message.clientId})`);
                         if (gameInstanceRef.current) {
                             gameInstanceRef.current.registry.set('clientId', message.clientId);
+                            // console.log(`[Frontend] Set clientId ${message.clientId} in registry.`);
+                        } else {
+                            // console.warn('[Frontend] gameInstanceRef.current is null, cannot set clientId in registry.');
                         }
                     } else if (message.type === 'chat') {
                         console.log(`Chat from ${message.senderId}: ${message.payload}`);
