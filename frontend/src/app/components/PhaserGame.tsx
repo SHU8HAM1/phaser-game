@@ -65,8 +65,38 @@ const OBSTACLE_MATRIX: number[][] = [
 
 // Main Scene for basic game elements
 class MainScene extends Phaser.Scene {
+    private player?: Phaser.Types.Physics.Arcade.SpriteWithDynamicBody; // Local player sprite
+    private otherPlayers: Map<string, Phaser.Types.Physics.Arcade.SpriteWithDynamicBody>; // Sprites for other players
+    private cursors?: Phaser.Types.Input.Keyboard.CursorKeys;
+    private mapMatrix?: number[][];
+    private ws?: WebSocket;
+    private pressedKeys: Set<string>;
+    private localClientId?: string;
+    private lastServerUpdate: any = null; // Store the last received game state
+
     constructor() {
         super('MainScene');
+        this.pressedKeys = new Set();
+        this.otherPlayers = new Map();
+    }
+
+    init() {
+        // Attempt to get WebSocket from registry
+        this.ws = this.game.registry.get('ws');
+        this.localClientId = this.game.registry.get('clientId');
+
+        // Listen for changes in registry if they are set later
+        this.game.registry.events.on('changedata-ws', (_parent: any, value: WebSocket) => {
+            this.ws = value;
+        });
+        this.game.registry.events.on('changedata-clientId', (_parent: any, value: string) => {
+            this.localClientId = value;
+        });
+         this.game.registry.events.on('changedata-serverGameState', (_parent: any, value: any) => {
+            this.lastServerUpdate = value;
+            // Process immediately if needed, or pick up in update()
+            // this.handleGameStateUpdate(value);
+        });
     }
 
     preload() {
@@ -75,6 +105,20 @@ class MainScene extends Phaser.Scene {
 
     create() {
         console.log('MainScene create');
+
+        // Retrieve WebSocket connection from registry
+        this.ws = this.game.registry.get('ws');
+        if (this.ws) {
+            console.log('MainScene: WebSocket connection retrieved from registry.');
+        } else {
+            console.warn('MainScene: WebSocket connection not found in registry at create time. Will check in update.');
+            // Optionally, listen for an event from the registry if ws is set later
+            this.game.registry.events.on('changedata-ws', (_parent: any, value: WebSocket) => {
+                console.log('MainScene: WebSocket connection set in registry after create.');
+                this.ws = value;
+            });
+        }
+
 
         // Tilemap configuration for your orthogonal tileset
         const mapWidth = 30; // Number of tiles wide
@@ -172,41 +216,187 @@ class MainScene extends Phaser.Scene {
         });
 
 
-        this.cursors = this.input.keyboard?.createCursorKeys();
+        this.cursors = this.input.keyboard?.createCursorKeys(); // Keep for easy access to key states if needed, but direct event handling is better for press/release.
 
         // After generating obstacleData and creating the player
         // Store map and player position as matrices for backend use
         this.mapMatrix = obstacleData.map(row => [...row]);
-        this.playerPosition = { x: player.x, y: player.y };
+        // this.playerPosition = { x: player.x, y: player.y }; // Player position will be updated by server
+
+        // Setup keyboard event handling for sending messages
+        this.input.keyboard?.on('keydown', (event: KeyboardEvent) => {
+            this.handleKeyEvent(event.key, 'keyPress');
+        });
+
+        this.input.keyboard?.on('keyup', (event: KeyboardEvent) => {
+            this.handleKeyEvent(event.key, 'keyRelease');
+        });
     }
 
-    private player?: Phaser.Types.Physics.Arcade.SpriteWithDynamicBody;
-    private cursors?: Phaser.Types.Input.Keyboard.CursorKeys;
-    private mapMatrix?: number[][];
-    private playerPosition?: { x: number, y: number };
+    private sendKeyWebSocketMessage(key: string, type: 'keyPress' | 'keyRelease') {
+        if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+            const message = {
+                type: type,
+                payload: {
+                    key: key,
+                    timestamp: Date.now()
+                }
+            };
+            this.ws.send(JSON.stringify(message));
+            // console.log(`Sent ${type}: ${key}`);
+        } else {
+            // Attempt to re-fetch ws from registry if it wasn't available initially
+            if (!this.ws) this.ws = this.game.registry.get('ws');
+            if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+                 console.warn('WebSocket not connected. Key event not sent.');
+            } else {
+                // If ws was just re-fetched and is open, try sending again
+                this.ws.send(JSON.stringify({type: type, payload: { key: key, timestamp: Date.now() }}));
+            }
+        }
+    }
+
+    private handleKeyEvent(key: string, eventType: 'keyPress' | 'keyRelease') {
+        let gameKey: string | null = null;
+        switch (key) {
+            case 'ArrowUp': gameKey = 'Up'; break;
+            case 'ArrowDown': gameKey = 'Down'; break;
+            case 'ArrowLeft': gameKey = 'Left'; break;
+            case 'ArrowRight': gameKey = 'Right'; break;
+        }
+
+        if (gameKey) {
+            if (eventType === 'keyPress' && !this.pressedKeys.has(gameKey)) {
+                this.pressedKeys.add(gameKey);
+                this.sendKeyWebSocketMessage(gameKey, 'keyPress');
+                // Play animation locally for responsiveness
+                if (this.player) {
+                    if (gameKey === 'Left') this.player.anims.play('left', true);
+                    else if (gameKey === 'Right') this.player.anims.play('right', true);
+                    else if (gameKey === 'Up') this.player.anims.play('up', true);
+                    else if (gameKey === 'Down') this.player.anims.play('down', true);
+                }
+            } else if (eventType === 'keyRelease' && this.pressedKeys.has(gameKey)) {
+                this.pressedKeys.delete(gameKey);
+                this.sendKeyWebSocketMessage(gameKey, 'keyRelease');
+                // Stop animation or set to idle if no other movement keys are pressed
+                if (this.player && this.pressedKeys.size === 0) {
+                    this.player.anims.stop();
+                    // Optionally set to an idle frame: this.player.setFrame(someIdleFrame);
+                } else if (this.player) {
+                    // If other keys are still pressed, play their animation
+                    // This logic might need refinement based on desired behavior for multiple key presses
+                    if (this.pressedKeys.has('Left')) this.player.anims.play('left', true);
+                    else if (this.pressedKeys.has('Right')) this.player.anims.play('right', true);
+                    else if (this.pressedKeys.has('Up')) this.player.anims.play('up', true);
+                    else if (this.pressedKeys.has('Down')) this.player.anims.play('down', true);
+                }
+            }
+        }
+    }
+
 
     update(time: number, delta: number) {
-        if (!this.cursors || !this.player) return;
-        const speed = 200;
-        let vx = 0, vy = 0;
-        if (this.cursors.left.isDown) {
-            vx = -speed;
-            this.player.anims.play('left', true);
-        } else if (this.cursors.right.isDown) {
-            vx = speed;
-            this.player.anims.play('right', true);
-        } else if (this.cursors.up.isDown) {
-            vy = -speed;
-            this.player.anims.play('up', true);
-        } else if (this.cursors.down.isDown) {
-            vy = speed;
-            this.player.anims.play('down', true);
-        } else {
-            this.player.anims.stop();
+        // Ensure ws and clientId are available if they weren't at init/create
+        if (!this.ws) this.ws = this.game.registry.get('ws');
+        if (!this.localClientId) this.localClientId = this.game.registry.get('clientId');
+
+        const serverGameState = this.game.registry.get('serverGameState');
+        if (serverGameState && serverGameState !== this.lastServerUpdate) {
+            this.lastServerUpdate = serverGameState; // Mark as processed for this frame, or use a more robust flag
+            this.handleGameStateUpdate(serverGameState);
         }
-        this.player.setVelocity(vx, vy);
-        // Update player position for backend use
-        this.playerPosition = { x: this.player.x, y: this.player.y };
+        // Clear the registry value after processing to avoid reprocessing if no new update comes
+        // Or rely on this.lastServerUpdate comparison. For now, let's clear it.
+        this.game.registry.set('serverGameState', null);
+
+
+        // Local animation updates for the local player (based on pressed keys)
+        // This provides immediate feedback, while actual position is server-driven.
+        // This part can be refined: animations might better be driven by server velocity.
+        if (this.player && this.pressedKeys.size > 0) {
+            if (this.pressedKeys.has('Left')) this.player.anims.play('left', true);
+            else if (this.pressedKeys.has('Right')) this.player.anims.play('right', true);
+            else if (this.pressedKeys.has('Up')) this.player.anims.play('up', true);
+            else if (this.pressedKeys.has('Down')) this.player.anims.play('down', true);
+        } else if (this.player && this.pressedKeys.size === 0) {
+            // If server also sends velocity, use that to determine if player is idle.
+            // For now, if no keys are pressed, stop animation.
+            // This might conflict if server says player is moving due to latency.
+            // A better approach is to have server state include current animation or velocity.
+            // Let's assume server player state includes vx, vy.
+            const localPlayerData = this.lastServerUpdate?.players[this.localClientId!];
+            if (localPlayerData && localPlayerData.vx === 0 && localPlayerData.vy === 0) {
+                 this.player.anims.stop();
+            }
+        }
+    }
+
+    private handleGameStateUpdate(gameState: any) {
+        if (!gameState || !gameState.players) return;
+
+        const serverPlayers = gameState.players;
+        const allServerPlayerIds = Object.keys(serverPlayers);
+
+        // Update local player
+        if (this.player && this.localClientId && serverPlayers[this.localClientId]) {
+            const playerData = serverPlayers[this.localClientId];
+            this.tweens.add({
+                targets: this.player,
+                x: playerData.x,
+                y: playerData.y,
+                duration: 100, // Corresponds roughly to server tick rate, adjust for smoothness
+                ease: 'Linear'
+            });
+
+            // Update animation based on server velocity for local player
+            if (playerData.vx < 0) this.player.anims.play('left', true);
+            else if (playerData.vx > 0) this.player.anims.play('right', true);
+            else if (playerData.vy < 0) this.player.anims.play('up', true);
+            else if (playerData.vy > 0) this.player.anims.play('down', true);
+            else this.player.anims.stop(); // Idle if no velocity
+        }
+
+        // Update or create other players
+        allServerPlayerIds.forEach(clientId => {
+            if (clientId === this.localClientId) return; // Already handled
+
+            const playerData = serverPlayers[clientId];
+            let otherPlayerSprite = this.otherPlayers.get(clientId);
+
+            if (!otherPlayerSprite) { // Create new sprite for new player
+                console.log(`Creating sprite for new player ${clientId}`);
+                otherPlayerSprite = this.physics.add.sprite(playerData.x, playerData.y, 'player').setScale(1);
+                otherPlayerSprite.body.setSize(28,28).setOffset(10,10); // Match local player collision
+                // otherPlayerSprite.setCollideWorldBounds(true); // If they need physics interaction
+                this.otherPlayers.set(clientId, otherPlayerSprite);
+            }
+
+            // Tween existing other player sprite
+            this.tweens.add({
+                targets: otherPlayerSprite,
+                x: playerData.x,
+                y: playerData.y,
+                duration: 100, // Adjust for smoothness
+                ease: 'Linear'
+            });
+
+            // Update animation for other players based on server velocity
+            if (playerData.vx < 0) otherPlayerSprite.anims.play('left', true);
+            else if (playerData.vx > 0) otherPlayerSprite.anims.play('right', true);
+            else if (playerData.vy < 0) otherPlayerSprite.anims.play('up', true);
+            else if (playerData.vy > 0) otherPlayerSprite.anims.play('down', true);
+            else otherPlayerSprite.anims.stop();
+        });
+
+        // Remove sprites for players who disconnected
+        this.otherPlayers.forEach((sprite, clientId) => {
+            if (!allServerPlayerIds.includes(clientId)) {
+                console.log(`Removing sprite for disconnected player ${clientId}`);
+                sprite.destroy();
+                this.otherPlayers.delete(clientId);
+            }
+        });
     }
 }
 
@@ -226,6 +416,11 @@ const PhaserGame: React.FC<PhaserGameProps> = () => {
             socket.onopen = () => {
                 console.log('WebSocket connection established');
                 wsRef.current = socket;
+                // Store WebSocket instance in Phaser Registry for scenes to access
+                if (gameInstanceRef.current) {
+                    gameInstanceRef.current.registry.set('ws', socket);
+                    console.log('WebSocket instance stored in Phaser Registry.');
+                }
                 // Optionally send a message upon connection
                 // socket.send(JSON.stringify({ type: 'clientHello', message: 'Hello from Phaser frontend!' }));
             };
@@ -236,12 +431,21 @@ const PhaserGame: React.FC<PhaserGameProps> = () => {
                     const message = JSON.parse(event.data as string);
                     // Handle messages from the server
                     if (message.type === 'gameStateUpdate') {
-                        console.log('Game state update:', message.payload);
-                        // Here you would update your Phaser game based on the new state
-                        // For example, by calling a method on a scene:
-                        // gameInstanceRef.current?.scene.getScene('MainScene').data.set('gameState', message.payload);
+                        // console.log('Game state update:', message.payload); // Can be too verbose
+                        // Pass the gameState to the active scene (MainScene) via registry
+                        if (gameInstanceRef.current) {
+                            // It's good practice to pass only necessary data or diffs,
+                            // but for now, we pass the whole player's part of the payload.
+                            // The scene will decide how to use it.
+                            gameInstanceRef.current.registry.set('serverGameState', message.payload);
+                            // We can also emit an event if the scene needs to react immediately
+                            // gameInstanceRef.current.events.emit('serverGameStateUpdate', message.payload);
+                        }
                     } else if (message.type === 'welcome') {
                         console.log(`Welcome message from server: ${message.message} (Client ID: ${message.clientId})`);
+                        if (gameInstanceRef.current) {
+                            gameInstanceRef.current.registry.set('clientId', message.clientId);
+                        }
                     } else if (message.type === 'chat') {
                         console.log(`Chat from ${message.senderId}: ${message.payload}`);
                     } else if (message.type === 'error') {
