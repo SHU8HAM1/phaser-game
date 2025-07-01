@@ -85,8 +85,10 @@ wss.on('connection', (ws) => {
 
       if (message.type === 'keyPress') {
         player.activeKeys.add(message.payload.key);
+        // console.log(`[${clientId}] KeyPress: ${message.payload.key}, ActiveKeys: ${Array.from(player.activeKeys)}`);
       } else if (message.type === 'keyRelease') {
         player.activeKeys.delete(message.payload.key);
+        // console.log(`[${clientId}] KeyRelease: ${message.payload.key}, ActiveKeys: ${Array.from(player.activeKeys)}`);
       } else if (message.type === 'chat') {
         // Example: Broadcast chat message to all clients
         const chatMessage = JSON.stringify({ type: 'chat', senderId: clientId, payload: message.payload });
@@ -137,57 +139,81 @@ function gameLoop() {
     }
 
     // Calculate potential new position
-    let nextX = player.x + player.vx * deltaTime;
-    let nextY = player.y + player.vy * deltaTime;
+    let currentX = player.x;
+    let currentY = player.y;
+    let nextX = currentX + player.vx * deltaTime;
+    let nextY = currentY + player.vy * deltaTime;
 
-    // --- Collision Detection ---
-    // Basic AABB collision with tilemap. Player's anchor is top-left for sprite.
-    // For simplicity, check a single point (e.g. center or future position of corners).
-    // A more robust check would involve player's bounding box.
-    // Player's body in Phaser is setSize(28, 28).setOffset(10, 10) from a 48x48 sprite.
-    // Let's assume player's effective collision box center for now.
-    // Player dimensions: width 28, height 28. Sprite anchor is 0.5,0.5 by default if not set for physics body.
-    // But physics body has offset. Let's use player x,y as top-left of bounding box for simplicity.
-    // Player bounding box: (nextX, nextY) to (nextX + 28, nextY + 28)
-
-    // For simplicity, let's check the target tile for the player's center.
-    // Player center: nextX + 14, nextY + 14
-    const targetTileX = Math.floor((nextX + 14) / TILE_SIZE);
-    const targetTileY = Math.floor((nextY + 14) / TILE_SIZE);
-
+    let finalX = currentX;
+    let finalY = currentY;
     let canMoveX = true;
     let canMoveY = true;
 
+    // --- Collision Detection ---
+    // Player dimensions (approximate collision box)
+    const playerWidth = 28;
+    const playerHeight = 28;
+
     // Check X-axis movement
-    const checkTileX = Math.floor((nextX + (player.vx > 0 ? 28 : 0) ) / TILE_SIZE); // Check leading edge for X
-    const tileAtNextX = OBSTACLE_MATRIX[targetTileY] && OBSTACLE_MATRIX[targetTileY][checkTileX];
-    if (tileAtNextX !== -1 && tileAtNextX !== undefined) { // Collision on X
-        canMoveX = false;
+    if (player.vx !== 0) {
+        const xLeadingEdge = player.vx > 0 ? nextX + playerWidth : nextX;
+        const xTile = Math.floor(xLeadingEdge / TILE_SIZE);
+
+        // Check tiles at player's current top and bottom Y for the new X position
+        const yTileTop = Math.floor(currentY / TILE_SIZE);
+        const yTileBottom = Math.floor((currentY + playerHeight -1) / TILE_SIZE); // -1 to stay within player
+
+        const collisionTileXTop = OBSTACLE_MATRIX[yTileTop] && OBSTACLE_MATRIX[yTileTop][xTile];
+        const collisionTileXBottom = OBSTACLE_MATRIX[yTileBottom] && OBSTACLE_MATRIX[yTileBottom][xTile];
+
+        if ((collisionTileXTop !== -1 && collisionTileXTop !== undefined) ||
+            (collisionTileXBottom !== -1 && collisionTileXBottom !== undefined)) {
+            canMoveX = false;
+        }
     }
-
-    // Check Y-axis movement
-    const checkTileY = Math.floor((nextY + (player.vy > 0 ? 28 : 0) ) / TILE_SIZE); // Check leading edge for Y
-    const tileAtNextY = OBSTACLE_MATRIX[checkTileY] && OBSTACLE_MATRIX[checkTileY][targetTileX];
-     if (tileAtNextY !== -1 && tileAtNextY !== undefined) { // Collision on Y
-        canMoveY = false;
-    }
-
-    // More refined collision: check all four corners of the player's bounding box
-    // Player bounding box: (x, y) to (x + playerWidth, y + playerHeight)
-    // For now, using a simplified check. A full AABB vs Tilemap check is more involved.
-
     if (canMoveX) {
-        player.x = nextX;
+        finalX = nextX;
+    }
+
+    // Check Y-axis movement (using potentially updated X if sliding is desired, or currentX if not)
+    // For simplicity, let's use finalX from X-movement resolution.
+    if (player.vy !== 0) {
+        const yLeadingEdge = player.vy > 0 ? nextY + playerHeight : nextY;
+        const yTile = Math.floor(yLeadingEdge / TILE_SIZE);
+
+        // Check tiles at player's resolved X (finalX) left and right for the new Y position
+        const xTileLeft = Math.floor(finalX / TILE_SIZE);
+        const xTileRight = Math.floor((finalX + playerWidth -1) / TILE_SIZE);
+
+        const collisionTileYLeft = OBSTACLE_MATRIX[yTile] && OBSTACLE_MATRIX[yTile][xTileLeft];
+        const collisionTileYRight = OBSTACLE_MATRIX[yTile] && OBSTACLE_MATRIX[yTile][xTileRight];
+
+        if ((collisionTileYLeft !== -1 && collisionTileYLeft !== undefined) ||
+            (collisionTileYRight !== -1 && collisionTileYRight !== undefined)) {
+            canMoveY = false;
+        }
     }
     if (canMoveY) {
-        player.y = nextY;
+        finalY = nextY;
     }
 
-    // Ensure player stays within map bounds (pixel coordinates)
-    // This is a secondary check to the border tiles in OBSTACLE_MATRIX
+    player.x = finalX;
+    player.y = finalY;
+
+    // Ensure player stays within overall map pixel bounds (redundant if border tiles are solid)
     player.x = Math.max(0, Math.min(player.x, MAP_WIDTH_TILES * TILE_SIZE - 28)); // 28 is player width
     player.y = Math.max(0, Math.min(player.y, MAP_HEIGHT_TILES * TILE_SIZE - 28)); // 28 is player height
 
+    // if (player.vx !== 0 || player.vy !== 0 || player.activeKeys.size > 0) { // Debug Log
+    //   console.log(
+    //     `[GameLoop] Client: ${clientId}, ` +
+    //     `ActiveKeys: ${Array.from(player.activeKeys)}, ` +
+    //     `VX: ${player.vx.toFixed(2)}, VY: ${player.vy.toFixed(2)}, ` +
+    //     `NextX: ${nextX.toFixed(2)}, NextY: ${nextY.toFixed(2)}, ` + // nextX, nextY are now local to the loop iteration
+    //     `FinalX: ${player.x.toFixed(2)}, FinalY: ${player.y.toFixed(2)}, ` +
+    //     `canMoveX: ${canMoveX}, canMoveY: ${canMoveY}` // canMoveX, canMoveY are now local
+    //   );
+    // }
   });
 
   broadcastGameState();

@@ -333,7 +333,12 @@ class MainScene extends Phaser.Scene {
     }
 
     private handleGameStateUpdate(gameState: any) {
-        if (!gameState || !gameState.players) return;
+        if (!gameState || !gameState.players) {
+            // console.warn('[Frontend] handleGameStateUpdate received invalid or empty gameState:', gameState);
+            return;
+        }
+        // Deep clone for logging to avoid issues if gameState is mutated elsewhere or to see it at this point in time
+        // console.log('[Frontend] Handling serverGameState:', JSON.parse(JSON.stringify(gameState)));
 
         const serverPlayers = gameState.players;
         const allServerPlayerIds = Object.keys(serverPlayers);
@@ -341,13 +346,23 @@ class MainScene extends Phaser.Scene {
         // Update local player
         if (this.player && this.localClientId && serverPlayers[this.localClientId]) {
             const playerData = serverPlayers[this.localClientId];
-            this.tweens.add({
-                targets: this.player,
-                x: playerData.x,
-                y: playerData.y,
-                duration: 100, // Corresponds roughly to server tick rate, adjust for smoothness
-                ease: 'Linear'
-            });
+            // console.log(`[Frontend] LocalPlayer (${this.localClientId}) Update: ServerPos {x: ${playerData.x.toFixed(2)}, y: ${playerData.y.toFixed(2)}}, ServerVel {vx: ${playerData.vx.toFixed(2)}, vy: ${playerData.vy.toFixed(2)}}. CurrentSpritePos {x: ${this.player.x.toFixed(2)}, y: ${this.player.y.toFixed(2)}}`);
+
+            // Only tween if there's a significant difference to avoid micro-tweens
+            if (Math.abs(this.player.x - playerData.x) > 0.5 || Math.abs(this.player.y - playerData.y) > 0.5) {
+                // console.log(`[Frontend] LocalPlayer (${this.localClientId}): Tweening from (${this.player.x.toFixed(2)}, ${this.player.y.toFixed(2)}) to (${playerData.x.toFixed(2)}, ${playerData.y.toFixed(2)})`);
+                this.tweens.add({
+                    targets: this.player,
+                    x: playerData.x,
+                    y: playerData.y,
+                    duration: 80, // Slightly less than typical server tick interval for catch-up
+                    ease: 'Linear'
+                });
+            } else {
+                // Snap to position if difference is small, or if not tweening
+                this.player.x = playerData.x;
+                this.player.y = playerData.y;
+            }
 
             // Update animation based on server velocity for local player
             if (playerData.vx < 0) this.player.anims.play('left', true);
